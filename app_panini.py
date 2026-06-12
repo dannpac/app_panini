@@ -33,13 +33,37 @@ def init_db():
     ''')
     conn.commit()
     
-    # Purga imperativa de rastros obsoletos
+    # 1. PURGA IMPERATIVA DE SECCIONES ANTERIORES PARA EVITAR SOLAPAMIENTOS
     cursor.execute("DELETE FROM Album_State WHERE StickerID LIKE 'INTRO-%'")
-    cursor.execute("DELETE FROM Stickers WHERE StickerID LIKE 'INTRO-%' OR Section = 'Intro / Especiales'")
+    cursor.execute("DELETE FROM Stickers WHERE StickerID LIKE 'INTRO-%'")
     conn.commit()
     
-    # Catálogo oficial (390 Cromos)
+    # 2. LISTADO MAESTRO CORREGIDO DE LAS 48 SELECCIONES OFICIALES
+    teams_map = {
+        "MEX": "México", "RSA": "Sudáfrica", "KOR": "República de Corea", "CZE": "República Checa",
+        "CAN": "Canadá", "BIH": "Bosnia y Herzegovina", "QAT": "Catar", "SUI": "Suiza",
+        "BRA": "Brasil", "MAR": "Marruecos", "HAI": "Haití", "SCO": "Escocia",
+        "USA": "EE. UU.", "PAR": "Paraguay", "AUS": "Australia", "TUR": "Turquía",
+        "GER": "Alemania", "CUW": "Curacao", "CIV": "Costa de Marfil", "ECU": "Ecuador",
+        "NED": "Países Bajos", "JPN": "Japón", "SWE": "Suecia", "TUN": "Túnez",
+        "BEL": "Bélgica", "EGY": "Egipto", "IRN": "RI de Irán", "NZL": "Nueva Zelanda",
+        "ESP": "España", "CPV": "Cabo Verde", "KSA": "Arabia Saudí", "URU": "Uruguay",
+        "FRA": "Francia", "SEN": "Senegal", "IRQ": "Irak", "NOR": "Noruega",
+        "ARG": "Argentina", "ALG": "Argelia", "AUT": "Austria", "JOR": "Jordania",
+        "POR": "Portugal", "COD": "República Democrática del Congo", "UZB": "Uzbekistán", "COL": "Colombia",
+        "ENG": "Inglaterra", "CRO": "Croacia", "GHA": "Ghana", "PAN": "Panamá"
+    }
+    
+    # Purgamos de la tabla Stickers cualquier país que no esté en la lista correcta actual
+    valid_sections = ["Intro / Especiales"] + list(teams_map.values())
+    placeholders = ",".join("?" for _ in valid_sections)
+    cursor.execute(f"DELETE FROM Album_State WHERE StickerID IN (SELECT StickerID FROM Stickers WHERE Section NOT IN ({placeholders}))", valid_sections)
+    cursor.execute(f"DELETE FROM Stickers WHERE Section NOT IN ({placeholders})", valid_sections)
+    conn.commit()
+
     official_stickers = []
+    
+    # Las 9 de la Intro / Especiales
     intro_names = {
         1: "FIFA World Cup Logo (Top)", 2: "FIFA World Cup Logo (Bottom)",
         3: "Official Mascots", 4: "Official Slogan", 5: "Official Ball",
@@ -49,31 +73,33 @@ def init_db():
     for i in range(1, 10):
         official_stickers.append((f"FWC {i}", intro_names[i], "Intro / Especiales"))
         
-    teams_map = {
-        "ARG": "Argentina", "AUS": "Australia", "AUT": "Austria", "BEL": "Bélgica",
-        "BIH": "Bosnia y Herzegovina", "BRA": "Brasil", "CAN": "Canadá", "CIV": "Costa de Marfil",
-        "CMR": "Camerún", "COL": "Colombia", "CPV": "Cabo Verde", "CRO": "Croacia",
-        "CZE": "República Checa", "DEN": "Dinamarca", "ECU": "Ecuador", "EGY": "Egipto",
-        "ENG": "Inglaterra", "ESP": "España", "FRA": "Francia", "GER": "Alemania",
-        "GHA": "Ghana", "IRN": "Irán", "ITA": "Italia", "JPN": "Japón",
-        "KSA": "Arabia Saudí", "MAR": "Marruecos", "MEX": "México", "NED": "Países Bajos",
-        "POR": "Portugal", "RSA": "Sudáfrica", "SWE": "Suecia", "USA": "Estados Unidos"
+    # Jugadores élite conocidos mapeados estratégicamente para las selecciones clave
+    known_players = {
+        "ARG-01": "Emiliano Martínez", "ARG-04": "Lautaro Martínez", "AUT-01": "David Alaba", 
+        "COL-05": "Luis Díaz", "CRO-01": "Luka Modrić", "CRO-02": "Joško Gvardiol", 
+        "ESP-01": "Rodri", "FRA-01": "Kylian Mbappé", "GER-04": "Florian Wirtz", 
+        "GER-07": "Jamal Musiala", "MEX-04": "Hirving Lozano", "NED-03": "Virgil van Dijk", 
+        "NOR-09": "Erling Haaland", "BRA-10": "Vinícius Jr.", "POR-07": "Cristiano Ronaldo"
     }
+    
+    # Inyección de las 48 Selecciones (Escudo + 11 Jugadores)
     for code, team_name in teams_map.items():
         official_stickers.append((f"{code}-00", f"Escudo Oficial de {team_name}", team_name))
         for i in range(1, 12):
-            official_stickers.append((f"{code}-{i:02d}", f"Jugador {i:02d}", team_name))
+            sticker_id = f"{code}-{i:02d}"
+            player_name = known_players.get(sticker_id, f"Jugador {i:02d}")
+            official_stickers.append((sticker_id, player_name, team_name))
             
     cursor.executemany("INSERT OR IGNORE INTO Stickers VALUES (?, ?, ?)", official_stickers)
     conn.commit()
     
-    # Sincronización en caliente
+    # Sincronización transaccional de nuevos cromos a los usuarios existentes
     cursor.execute("SELECT UserID FROM Users")
     all_uids = [row[0] for row in cursor.fetchall()]
     for u_id in all_uids:
         cursor.execute("""
             INSERT OR IGNORE INTO Album_State (UserID, StickerID, Status) 
-            SELECT ?, StickerID, 0 FROM Stickers WHERE Section = 'Intro / Especiales'
+            SELECT ?, StickerID, 0 FROM Stickers
         """, (u_id,))
     conn.commit()
     conn.close()
@@ -131,7 +157,6 @@ def update_user_status(user_id, sticker_id, new_status):
 st.set_page_config(page_title="Panini Matrix Tracker", layout="wide", initial_sidebar_state="expanded")
 init_db()
 
-# INYECCIÓN DEL MOTOR CSS OPTIMIZADO A UNA COLUMNA EN MÓVIL
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&family=Inter:wght@300;400;500&display=swap');
@@ -146,7 +171,6 @@ st.markdown("""
     }
     .premium-title { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 2rem; background: linear-gradient(90deg, #6366f1, #a855f7, #ec4899); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0; }
     
-    /* Configuración de Botón Base Estándar */
     div.stButton > button { 
         font-family: 'Space Grotesk', sans-serif; 
         border-radius: 12px; 
@@ -166,17 +190,15 @@ st.markdown("""
     .stMetric { background: #111318; padding: 15px; border-radius: 14px; border: 1px solid rgba(255, 255, 255, 0.05); }
     .lock-screen { text-align: center; padding: 30px; background: #111318; border-radius: 16px; border: 1px solid rgba(255, 255, 255, 0.05); margin-top: 20px; }
     
-    /* MODIFICACIÓN CRÍTICA: Ajuste estricto a 1 columna completa para celulares */
     @media (max-width: 768px) {
         [data-testid="stHorizontalBlock"] { display: flex !important; flex-wrap: wrap !important; gap: 10px !important; }
-        /* El ancho al 100% fuerza a que cada cromo ocupe todo el ancho de la pantalla del celular */
         [data-testid="stHorizontalBlock"] > div { min-width: 100% !important; flex: 1 1 100% !important; padding: 0 !important; }
         .premium-title { font-size: 1.5rem !important; }
     }
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="premium-header"><h1 class="premium-title">PANINI MATRIX TRACKER</h1><p style="color: #9ca3af; margin: 5px 0 0 0; font-size: 1.1em; font-weight: 300;">Plataforma de Intercambio — Edición Estándar (32 Selecciones)</p></div>', unsafe_allow_html=True)
+st.markdown('<div class="premium-header"><h1 class="premium-title">PANINI MATRIX TRACKER</h1><p style="color: #9ca3af; margin: 5px 0 0 0; font-size: 1.1em; font-weight: 300;">Plataforma de Intercambio — Catálogo Expandido Oficial (48 Selecciones)</p></div>', unsafe_allow_html=True)
 
 # --- PANEL DE CONTROL DE IDENTIDAD (SIDEBAR) ---
 st.sidebar.markdown("<h3 style='font-family: Space Grotesk;'>🆔 PANEL DE IDENTIDAD</h3>", unsafe_allow_html=True)
@@ -209,7 +231,7 @@ if not selected_user:
     st.markdown("""
         <div class="lock-screen">
             <h2 style="font-family: Space Grotesk; color: #a855f7;">👤 IDENTIFICACIÓN REQUERIDA</h2>
-            <p style="color: #9ca3af;">Selecciona tu alias en el menú de la barra lateral para desplegar tu matriz adaptativa.</p>
+            <p style="color: #9ca3af;">Selecciona tu alias en el menú de la barra lateral para desplegar tu matriz adaptativa de 48 selecciones.</p>
         </div>
     """, unsafe_allow_html=True)
 else:
@@ -224,7 +246,7 @@ else:
     
     selected_section = st.sidebar.selectbox("Sección Activa:", sections)
     
-    # KPIs globales
+    # KPIs globales actualizados al nuevo volumen de 585 cromos
     total = len(df_album)
     owned = len(df_album[df_album["Status"] >= 1])
     dupes = len(df_album[df_album["Status"] == 2])
@@ -244,7 +266,6 @@ else:
     # --- TAB 1: PANEL DEL ÁLBUM ---
     with tab_album:
         df_sec = df_album[df_album["Section"] == selected_section]
-        
         cols = st.columns(4)
         for idx, row in enumerate(df_sec.itertuples()):
             col = cols[idx % 4]
