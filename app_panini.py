@@ -33,24 +33,18 @@ def init_db():
     ''')
     conn.commit()
     
-    # 1. PURGA IMPERATIVA: Limpiamos por completo rastros obsoletos de la Intro antigua
+    # Purga imperativa de rastros obsoletos
     cursor.execute("DELETE FROM Album_State WHERE StickerID LIKE 'INTRO-%'")
     cursor.execute("DELETE FROM Stickers WHERE StickerID LIKE 'INTRO-%' OR Section = 'Intro / Especiales'")
     conn.commit()
     
-    # 2. Re-inyección e indexación del catálogo oficial completo (390 Cromos)
+    # Catálogo oficial (390 Cromos)
     official_stickers = []
-    
     intro_names = {
-        1: "FIFA World Cup Logo (Top)",
-        2: "FIFA World Cup Logo (Bottom)",
-        3: "Official Mascots",
-        4: "Official Slogan",
-        5: "Official Ball",
-        6: "Trophy Graphic (Red)",
-        7: "Trophy Graphic (Green)",
-        8: "Trophy Graphic (Blue)",
-        9: "Fair Play Emblem"
+        1: "FIFA World Cup Logo (Top)", 2: "FIFA World Cup Logo (Bottom)",
+        3: "Official Mascots", 4: "Official Slogan", 5: "Official Ball",
+        6: "Trophy Graphic (Red)", 7: "Trophy Graphic (Green)",
+        8: "Trophy Graphic (Blue)", 9: "Fair Play Emblem"
     }
     for i in range(1, 10):
         official_stickers.append((f"FWC {i}", intro_names[i], "Intro / Especiales"))
@@ -65,7 +59,6 @@ def init_db():
         "KSA": "Arabia Saudí", "MAR": "Marruecos", "MEX": "México", "NED": "Países Bajos",
         "POR": "Portugal", "RSA": "Sudáfrica", "SWE": "Suecia", "USA": "Estados Unidos"
     }
-    
     for code, team_name in teams_map.items():
         official_stickers.append((f"{code}-00", f"Escudo Oficial de {team_name}", team_name))
         for i in range(1, 12):
@@ -74,8 +67,7 @@ def init_db():
     cursor.executemany("INSERT OR IGNORE INTO Stickers VALUES (?, ?, ?)", official_stickers)
     conn.commit()
     
-    # 3. RE-SINCRONIZACIÓN AGRESIVA EN CALIENTE:
-    # Forzamos la inserción de las filas FWC que falten para CUALQUIER usuario viejo registrado
+    # Sincronización en caliente
     cursor.execute("SELECT UserID FROM Users")
     all_uids = [row[0] for row in cursor.fetchall()]
     for u_id in all_uids:
@@ -135,11 +127,11 @@ def update_user_status(user_id, sticker_id, new_status):
     conn.commit()
     conn.close()
 
-# --- CONFIGURACIÓN DE ENTORNO VISUAL PREMIUM ---
+# --- CONFIGURACIÓN DE ENTORNO VISUAL ---
 st.set_page_config(page_title="Panini Matrix Tracker", layout="wide", initial_sidebar_state="expanded")
 init_db()
 
-# Inyección centralizada de estilos CSS mediante Markdown interactivo
+# INYECCIÓN DEL MOTOR CSS ESTÁNDAR RESPONSIVO
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&family=Inter:wght@300;400;500&display=swap');
@@ -154,55 +146,30 @@ st.markdown("""
     }
     .premium-title { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 2rem; background: linear-gradient(90deg, #6366f1, #a855f7, #ec4899); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0; }
     
-    /* Control de Altura Exacta (Grid Simétrica) */
-    .fwc-wrapper {
-        margin-bottom: 14px !important;
-    }
-    
-    /* Maquetación Base de los Botones Tipo Cromo */
+    /* Configuración de Botón Base Estándar */
     div.stButton > button { 
         font-family: 'Space Grotesk', sans-serif; 
         border-radius: 12px; 
         border: 1px solid rgba(255, 255, 255, 0.08) !important; 
         background: linear-gradient(145deg, #111827, #1f2937) !important; 
         color: #9ca3af !important; 
-        height: 68px !important; /* Altura fija mandatoria para todos los cromos */
+        height: 68px !important; 
         font-weight: 500; 
         font-size: 13px; 
         transition: all 0.2s ease-in-out !important; 
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2) !important; 
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
     }
-    div.stButton > button:hover { border-color: rgba(99, 102, 241, 0.6) !important; color: #ffffff !important; transform: translateY(-3px) scale(1.02) !important; }
+    div.stButton > button:hover { border-color: rgba(99, 102, 241, 0.6) !important; color: #ffffff !important; transform: translateY(-2px) scale(1.01) !important; }
     div.stButton > button[kind="primary"] { background: linear-gradient(145deg, #4f46e5, #4338ca) !important; color: #ffffff !important; box-shadow: 0 4px 14px rgba(79, 70, 229, 0.4) !important; }
     
     section[data-testid="stSidebar"] { background-color: #090b0f; border-right: 1px solid rgba(255, 255, 255, 0.05); }
     .stMetric { background: #111318; padding: 15px; border-radius: 14px; border: 1px solid rgba(255, 255, 255, 0.05); }
     .lock-screen { text-align: center; padding: 30px; background: #111318; border-radius: 16px; border: 1px solid rgba(255, 255, 255, 0.05); margin-top: 20px; }
     
-    /* Fusión Estética Vertical de FWC 1 y FWC 2 */
-    .fwc1-box {
-        margin-bottom: 0px !important;
-    }
-    .fwc1-box button { 
-        border-bottom-left-radius: 0px !important; 
-        border-bottom-right-radius: 0px !important; 
-        border-bottom: none !important; 
-        height: 68px !important;
-    }
-    .fwc2-box button { 
-        border-top-left-radius: 0px !important; 
-        border-top-right-radius: 0px !important; 
-        height: 68px !important;
-    }
-    
-    /* Consultas de Medios para Responsividad en Teléfonos Móviles */
+    /* COMPORTAMIENTO PARA DISPOSITIVOS MÓVILES (TODAS LAS SECCIONES POR IGUAL) */
     @media (max-width: 768px) {
         [data-testid="stHorizontalBlock"] { display: flex !important; flex-wrap: wrap !important; gap: 10px !important; }
         [data-testid="stHorizontalBlock"] > div { min-width: 46% !important; flex: 1 1 46% !important; padding: 0 !important; }
-        .fwc-wrapper { margin-bottom: 5px !important; }
         .premium-title { font-size: 1.5rem !important; }
     }
     </style>
@@ -256,7 +223,7 @@ else:
     
     selected_section = st.sidebar.selectbox("Sección Activa:", sections)
     
-    # Indicadores Clave de Rendimiento (KPIs) globales
+    # KPIs globales
     total = len(df_album)
     owned = len(df_album[df_album["Status"] >= 1])
     dupes = len(df_album[df_album["Status"] == 2])
@@ -277,93 +244,15 @@ else:
     with tab_album:
         df_sec = df_album[df_album["Section"] == selected_section]
         
-        if selected_section == "Intro / Especiales":
-            fwc_dict = {row.StickerID: row for row in df_sec.itertuples()}
-            
-            if len(fwc_dict) >= 9:
-                # Estructura paralela estricta de 4 columnas para alineación milimétrica horizontal
-                col1, col2, col3, col4 = st.columns(4)
-                
-                with col1:
-                    # FWC 1 (Logo Top)
-                    r1 = fwc_dict["FWC 1"]
-                    l1 = f"✨ {r1.StickerID}\n{r1.Name}" if r1.Status >= 1 else f"⬡ {r1.StickerID}\n{r1.Name}"
-                    st.markdown('<div class="fwc-wrapper fwc1-box">', unsafe_allow_html=True)
-                    if st.button(l1, key="al_FWC_1", type="primary" if r1.Status >= 1 else "secondary", use_container_width=True):
-                        update_user_status(uid, "FWC 1", 0 if r1.Status >= 1 else 1)
-                        st.rerun()
-                    st.markdown('</div>', unsafe_allow_html=True)
-                    
-                    # FWC 2 (Logo Bottom)
-                    r2 = fwc_dict["FWC 2"]
-                    l2 = f"✨ {r2.StickerID}\n{r2.Name}" if r2.Status >= 1 else f"⬡ {r2.StickerID}\n{r2.Name}"
-                    st.markdown('<div class="fwc-wrapper fwc2-box">', unsafe_allow_html=True)
-                    if st.button(l2, key="al_FWC_2", type="primary" if r2.Status >= 1 else "secondary", use_container_width=True):
-                        update_user_status(uid, "FWC 2", 0 if r2.Status >= 1 else 1)
-                        st.rerun()
-                    st.markdown('</div>', unsafe_allow_html=True)
-                    
-                    # CORRECCIÓN DE ALINEACIÓN: FWC 9 se inyecta en la base de la columna 1
-                    r9 = fwc_dict["FWC 9"]
-                    is_owned9 = r9.Status >= 1
-                    l9 = f"✨ {r9.StickerID}\n{r9.Name}" if is_owned9 else f"⬡ {r9.StickerID}\n{r9.Name}"
-                    st.markdown('<div class="fwc-wrapper" style="margin-top: 14px;">', unsafe_allow_html=True)
-                    if st.button(l9, key="al_FWC_9", type="primary" if is_owned9 else "secondary", use_container_width=True):
-                        update_user_status(uid, "FWC 9", 0 if is_owned9 else 1)
-                        st.rerun()
-                    st.markdown('</div>', unsafe_allow_html=True)
-                
-                with col2:
-                    for fid in ["FWC 3", "FWC 6"]:
-                        row = fwc_dict[fid]
-                        is_owned = row.Status >= 1
-                        label = f"✨ {row.StickerID}\n{row.Name}" if is_owned else f"⬡ {row.StickerID}\n{row.Name}"
-                        st.markdown('<div class="fwc-wrapper">', unsafe_allow_html=True)
-                        if st.button(label, key=f"al_{row.StickerID}", type="primary" if is_owned else "secondary", use_container_width=True):
-                            update_user_status(uid, row.StickerID, 0 if is_owned else 1)
-                            st.rerun()
-                        st.markdown('</div>', unsafe_allow_html=True)
-                        
-                with col3:
-                    for fid in ["FWC 4", "FWC 7"]:
-                        row = fwc_dict[fid]
-                        is_owned = row.Status >= 1
-                        label = f"✨ {row.StickerID}\n{row.Name}" if is_owned else f"⬡ {row.StickerID}\n{row.Name}"
-                        st.markdown('<div class="fwc-wrapper">', unsafe_allow_html=True)
-                        if st.button(label, key=f"al_{row.StickerID}", type="primary" if is_owned else "secondary", use_container_width=True):
-                            update_user_status(uid, row.StickerID, 0 if is_owned else 1)
-                            st.rerun()
-                        st.markdown('</div>', unsafe_allow_html=True)
-                        
-                with col4:
-                    for fid in ["FWC 5", "FWC 8"]:
-                        row = fwc_dict[fid]
-                        is_owned = row.Status >= 1
-                        label = f"✨ {row.StickerID}\n{row.Name}" if is_owned else f"⬡ {row.StickerID}\n{row.Name}"
-                        st.markdown('<div class="fwc-wrapper">', unsafe_allow_html=True)
-                        if st.button(label, key=f"al_{row.StickerID}", type="primary" if is_owned else "secondary", use_container_width=True):
-                            update_user_status(uid, row.StickerID, 0 if is_owned else 1)
-                            st.rerun()
-                        st.markdown('</div>', unsafe_allow_html=True)
-            else:
-                cols = st.columns(4)
-                for idx, row in enumerate(df_sec.itertuples()):
-                    col = cols[idx % 4]
-                    is_owned = row.Status >= 1
-                    label = f"✨ {row.StickerID}\n{row.Name}" if is_owned else f"⬡ {row.StickerID}\n{row.Name}"
-                    if col.button(label, key=f"al_{row.StickerID}", type="primary" if is_owned else "secondary", use_container_width=True):
-                        update_user_status(uid, row.StickerID, 0 if is_owned else 1)
-                        st.rerun()
-        else:
-            # Cuadrícula estándar de 4 columnas para los países
-            cols = st.columns(4)
-            for idx, row in enumerate(df_sec.itertuples()):
-                col = cols[idx % 4]
-                is_owned = row.Status >= 1
-                label = f"✨ {row.StickerID}\n{row.Name}" if is_owned else f"⬡ {row.StickerID}\n{row.Name}"
-                if col.button(label, key=f"al_{row.StickerID}", type="primary" if is_owned else "secondary", use_container_width=True):
-                    update_user_status(uid, row.StickerID, 0 if is_owned else 1)
-                    st.rerun()
+        # ESTRUCTURA UNIFICADA: Se renderizan exactamente igual las postales de la intro y de los países
+        cols = st.columns(4)
+        for idx, row in enumerate(df_sec.itertuples()):
+            col = cols[idx % 4]
+            is_owned = row.Status >= 1
+            label = f"✨ {row.StickerID}\n{row.Name}" if is_owned else f"⬡ {row.StickerID}\n{row.Name}"
+            if col.button(label, key=f"al_{row.StickerID}", type="primary" if is_owned else "secondary", use_container_width=True):
+                update_user_status(uid, row.StickerID, 0 if is_owned else 1)
+                st.rerun()
 
     # --- TAB 2: PILA DE REPETIDAS ---
     with tab_trade:
@@ -382,7 +271,7 @@ else:
                     update_user_status(uid, row.StickerID, 1 if is_dupe else 2)
                     st.rerun()
 
-    # --- TAB 3: COPIAR LISTAS VIA PORTAPAPELES ---
+    # --- TAB 3: COPIAR LISTAS ---
     with tab_clipboard:
         st.subheader("📋 Generador de Listas de Intercambio")
         col_m, col_r = st.columns(2)
