@@ -131,7 +131,7 @@ def update_user_status(user_id, sticker_id, new_status):
 st.set_page_config(page_title="Panini Matrix Tracker", layout="wide", initial_sidebar_state="expanded")
 init_db()
 
-# INYECCIÓN DEL MOTOR CSS ESTÁNDAR RESPONSIVO
+# INYECCIÓN DEL MOTOR CSS OPTIMIZADO A UNA COLUMNA EN MÓVIL
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&family=Inter:wght@300;400;500&display=swap');
@@ -166,10 +166,11 @@ st.markdown("""
     .stMetric { background: #111318; padding: 15px; border-radius: 14px; border: 1px solid rgba(255, 255, 255, 0.05); }
     .lock-screen { text-align: center; padding: 30px; background: #111318; border-radius: 16px; border: 1px solid rgba(255, 255, 255, 0.05); margin-top: 20px; }
     
-    /* COMPORTAMIENTO PARA DISPOSITIVOS MÓVILES (TODAS LAS SECCIONES POR IGUAL) */
+    /* MODIFICACIÓN CRÍTICA: Ajuste estricto a 1 columna completa para celulares */
     @media (max-width: 768px) {
         [data-testid="stHorizontalBlock"] { display: flex !important; flex-wrap: wrap !important; gap: 10px !important; }
-        [data-testid="stHorizontalBlock"] > div { min-width: 46% !important; flex: 1 1 46% !important; padding: 0 !important; }
+        /* El ancho al 100% fuerza a que cada cromo ocupe todo el ancho de la pantalla del celular */
+        [data-testid="stHorizontalBlock"] > div { min-width: 100% !important; flex: 1 1 100% !important; padding: 0 !important; }
         .premium-title { font-size: 1.5rem !important; }
     }
     </style>
@@ -244,7 +245,6 @@ else:
     with tab_album:
         df_sec = df_album[df_album["Section"] == selected_section]
         
-        # ESTRUCTURA UNIFICADA: Se renderizan exactamente igual las postales de la intro y de los países
         cols = st.columns(4)
         for idx, row in enumerate(df_sec.itertuples()):
             col = cols[idx % 4]
