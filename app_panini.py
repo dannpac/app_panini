@@ -33,12 +33,12 @@ def init_db():
     ''')
     conn.commit()
     
-    # 1. PURGA IMPERATIVA DE SECCIONES ANTERIORES PARA EVITAR SOLAPAMIENTOS
+    # 1. PURGA IMPERATIVA DE DATOS ANTERIORES
     cursor.execute("DELETE FROM Album_State WHERE StickerID LIKE 'INTRO-%'")
     cursor.execute("DELETE FROM Stickers WHERE StickerID LIKE 'INTRO-%'")
     conn.commit()
     
-    # 2. LISTADO MAESTRO CORREGIDO DE LAS 48 SELECCIONES OFICIALES
+    # 2. LISTADO MAESTRO COMPLETO DE LAS 48 SELECCIONES OFICIALES
     teams_map = {
         "MEX": "México", "RSA": "Sudáfrica", "KOR": "República de Corea", "CZE": "República Checa",
         "CAN": "Canadá", "BIH": "Bosnia y Herzegovina", "QAT": "Catar", "SUI": "Suiza",
@@ -54,7 +54,6 @@ def init_db():
         "ENG": "Inglaterra", "CRO": "Croacia", "GHA": "Ghana", "PAN": "Panamá"
     }
     
-    # Purgamos de la tabla Stickers cualquier país que no esté en la lista correcta actual
     valid_sections = ["Intro / Especiales"] + list(teams_map.values())
     placeholders = ",".join("?" for _ in valid_sections)
     cursor.execute(f"DELETE FROM Album_State WHERE StickerID IN (SELECT StickerID FROM Stickers WHERE Section NOT IN ({placeholders}))", valid_sections)
@@ -63,37 +62,30 @@ def init_db():
 
     official_stickers = []
     
-    # Las 9 de la Intro / Especiales
-    intro_names = {
-        1: "FIFA World Cup Logo (Top)", 2: "FIFA World Cup Logo (Bottom)",
-        3: "Official Mascots", 4: "Official Slogan", 5: "Official Ball",
-        6: "Trophy Graphic (Red)", 7: "Trophy Graphic (Green)",
-        8: "Trophy Graphic (Blue)", 9: "Fair Play Emblem"
-    }
+    # Intro / Especiales (FWC 1 a FWC 9) - Ahora el nombre almacena solo el código limpio
     for i in range(1, 10):
-        official_stickers.append((f"FWC {i}", intro_names[i], "Intro / Especiales"))
+        official_stickers.append((f"FWC {i}", f"Postal FWC {i}", "Intro / Especiales"))
         
-    # Jugadores élite conocidos mapeados estratégicamente para las selecciones clave
-    known_players = {
-        "ARG-01": "Emiliano Martínez", "ARG-04": "Lautaro Martínez", "AUT-01": "David Alaba", 
-        "COL-05": "Luis Díaz", "CRO-01": "Luka Modrić", "CRO-02": "Joško Gvardiol", 
-        "ESP-01": "Rodri", "FRA-01": "Kylian Mbappé", "GER-04": "Florian Wirtz", 
-        "GER-07": "Jamal Musiala", "MEX-04": "Hirving Lozano", "NED-03": "Virgil van Dijk", 
-        "NOR-09": "Erling Haaland", "BRA-10": "Vinícius Jr.", "POR-07": "Cristiano Ronaldo"
-    }
-    
-    # Inyección de las 48 Selecciones (Escudo + 11 Jugadores)
+    # Inyección de las 48 Selecciones (Escudo -00 + 11 Casillas de códigos)
     for code, team_name in teams_map.items():
-        official_stickers.append((f"{code}-00", f"Escudo Oficial de {team_name}", team_name))
+        official_stickers.append((f"{code}-00", "Escudo Oficial", team_name))
         for i in range(1, 12):
             sticker_id = f"{code}-{i:02d}"
-            player_name = known_players.get(sticker_id, f"Jugador {i:02d}")
-            official_stickers.append((sticker_id, player_name, team_name))
+            official_stickers.append((sticker_id, f"Postal {sticker_id}", team_name))
             
-    cursor.executemany("INSERT OR IGNORE INTO Stickers VALUES (?, ?, ?)", official_stickers)
+    # Forzamos la actualización de nombres en la tabla maestra para limpiar registros viejos
+    cursor.execute("DROP TABLE IF EXISTS Stickers")
+    cursor.execute('''
+        CREATE TABLE Stickers (
+            StickerID TEXT PRIMARY KEY,
+            Name TEXT NOT NULL,
+            Section TEXT NOT NULL
+        )
+    ''')
+    cursor.executemany("INSERT INTO Stickers VALUES (?, ?, ?)", official_stickers)
     conn.commit()
     
-    # Sincronización transaccional de nuevos cromos a los usuarios existentes
+    # Re-sincronización transaccional
     cursor.execute("SELECT UserID FROM Users")
     all_uids = [row[0] for row in cursor.fetchall()]
     for u_id in all_uids:
@@ -177,9 +169,9 @@ st.markdown("""
         border: 1px solid rgba(255, 255, 255, 0.08) !important; 
         background: linear-gradient(145deg, #111827, #1f2937) !important; 
         color: #9ca3af !important; 
-        height: 68px !important; 
-        font-weight: 500; 
-        font-size: 13px; 
+        height: 60px !important; 
+        font-weight: 600; 
+        font-size: 14px; 
         transition: all 0.2s ease-in-out !important; 
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2) !important; 
     }
@@ -198,7 +190,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="premium-header"><h1 class="premium-title">PANINI MATRIX TRACKER</h1><p style="color: #9ca3af; margin: 5px 0 0 0; font-size: 1.1em; font-weight: 300;">Plataforma de Intercambio — Catálogo Expandido Oficial (48 Selecciones)</p></div>', unsafe_allow_html=True)
+st.markdown('<div class="premium-header"><h1 class="premium-title">PANINI MATRIX TRACKER</h1><p style="color: #9ca3af; margin: 5px 0 0 0; font-size: 1.1em; font-weight: 300;">Plataforma de Intercambio — Control por Códigos de Postal (48 Selecciones)</p></div>', unsafe_allow_html=True)
 
 # --- PANEL DE CONTROL DE IDENTIDAD (SIDEBAR) ---
 st.sidebar.markdown("<h3 style='font-family: Space Grotesk;'>🆔 PANEL DE IDENTIDAD</h3>", unsafe_allow_html=True)
@@ -246,7 +238,7 @@ else:
     
     selected_section = st.sidebar.selectbox("Sección Activa:", sections)
     
-    # KPIs globales actualizados al nuevo volumen de 585 cromos
+    # KPIs globales
     total = len(df_album)
     owned = len(df_album[df_album["Status"] >= 1])
     dupes = len(df_album[df_album["Status"] == 2])
@@ -263,14 +255,15 @@ else:
 
     tab_album, tab_trade, tab_clipboard = st.tabs(["🎴 PANEL DEL ÁLBUM", "🔄 PILA DE REPETIDAS", "📋 COPIAR LISTAS"])
 
-    # --- TAB 1: PANEL DEL ÁLBUM ---
+    # --- TAB 1: PANEL DEL ÁLBUM (MUESTRA SOLO EL CÓDIGO) ---
     with tab_album:
         df_sec = df_album[df_album["Section"] == selected_section]
         cols = st.columns(4)
         for idx, row in enumerate(df_sec.itertuples()):
             col = cols[idx % 4]
             is_owned = row.Status >= 1
-            label = f"✨ {row.StickerID}\n{row.Name}" if is_owned else f"⬡ {row.StickerID}\n{row.Name}"
+            # CORRECCIÓN: Los botones ahora despliegan únicamente el identificador único
+            label = f"✨ {row.StickerID}" if is_owned else f"⬡ {row.StickerID}"
             if col.button(label, key=f"al_{row.StickerID}", type="primary" if is_owned else "secondary", use_container_width=True):
                 update_user_status(uid, row.StickerID, 0 if is_owned else 1)
                 st.rerun()
