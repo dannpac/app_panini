@@ -33,12 +33,7 @@ def init_db():
     ''')
     conn.commit()
     
-    # 1. PURGA IMPERATIVA DE DATOS ANTERIORES
-    cursor.execute("DELETE FROM Album_State WHERE StickerID LIKE 'INTRO-%'")
-    cursor.execute("DELETE FROM Stickers WHERE StickerID LIKE 'INTRO-%'")
-    conn.commit()
-    
-    # 2. LISTADO MAESTRO COMPLETO DE LAS 48 SELECCIONES OFICIALES
+    # Catálogo maestro oficial de 48 selecciones
     teams_map = {
         "MEX": "México", "RSA": "Sudáfrica", "KOR": "República de Corea", "CZE": "República Checa",
         "CAN": "Canadá", "BIH": "Bosnia y Herzegovina", "QAT": "Catar", "SUI": "Suiza",
@@ -54,49 +49,26 @@ def init_db():
         "ENG": "Inglaterra", "CRO": "Croacia", "GHA": "Ghana", "PAN": "Panamá"
     }
     
-    valid_sections = ["Intro / Especiales"] + list(teams_map.values())
-    placeholders = ",".join("?" for _ in valid_sections)
-    cursor.execute(f"DELETE FROM Album_State WHERE StickerID IN (SELECT StickerID FROM Stickers WHERE Section NOT IN ({placeholders}))", valid_sections)
-    cursor.execute(f"DELETE FROM Stickers WHERE Section NOT IN ({placeholders})", valid_sections)
-    conn.commit()
-
-    official_stickers = []
-    
-    # Intro / Especiales (FWC 1 a FWC 9) - Ahora el nombre almacena solo el código limpio
-    for i in range(1, 10):
-        official_stickers.append((f"FWC {i}", f"Postal FWC {i}", "Intro / Especiales"))
+    cursor.execute("SELECT COUNT(*) FROM Stickers")
+    if cursor.fetchone()[0] == 0:
+        official_stickers = []
+        for i in range(1, 10):
+            official_stickers.append((f"FWC {i}", f"Postal FWC {i}", "Intro / Especiales"))
+        for code, team_name in teams_map.items():
+            official_stickers.append((f"{code}-00", "Escudo Oficial", team_name))
+            for i in range(1, 12):
+                sticker_id = f"{code}-{i:02d}"
+                official_stickers.append((sticker_id, f"Postal {sticker_id}", team_name))
+        cursor.executemany("INSERT INTO Stickers VALUES (?, ?, ?)", official_stickers)
+        conn.commit()
         
-    # Inyección de las 48 Selecciones (Escudo -00 + 11 Casillas de códigos)
-    for code, team_name in teams_map.items():
-        official_stickers.append((f"{code}-00", "Escudo Oficial", team_name))
-        for i in range(1, 12):
-            sticker_id = f"{code}-{i:02d}"
-            official_stickers.append((sticker_id, f"Postal {sticker_id}", team_name))
-            
-    # Forzamos la actualización de nombres en la tabla maestra para limpiar registros viejos
-    cursor.execute("DROP TABLE IF EXISTS Stickers")
-    cursor.execute('''
-        CREATE TABLE Stickers (
-            StickerID TEXT PRIMARY KEY,
-            Name TEXT NOT NULL,
-            Section TEXT NOT NULL
-        )
-    ''')
-    cursor.executemany("INSERT INTO Stickers VALUES (?, ?, ?)", official_stickers)
-    conn.commit()
-    
-    # Re-sincronización transaccional
     cursor.execute("SELECT UserID FROM Users")
     all_uids = [row[0] for row in cursor.fetchall()]
     for u_id in all_uids:
-        cursor.execute("""
-            INSERT OR IGNORE INTO Album_State (UserID, StickerID, Status) 
-            SELECT ?, StickerID, 0 FROM Stickers
-        """, (u_id,))
+        cursor.execute("INSERT OR IGNORE INTO Album_State (UserID, StickerID, Status) SELECT ?, StickerID, 0 FROM Stickers", (u_id,))
     conn.commit()
     conn.close()
 
-# --- CONTROLADORES DE TRANSACCIONALIDAD ---
 def get_all_users():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -139,65 +111,92 @@ def get_user_album(user_id):
     conn.close()
     return df
 
-def update_user_status(user_id, sticker_id, new_status):
+def update_user_status(user_id, sticker_id, current_status):
+    new_status = (current_status + 1) % 3
     conn = sqlite3.connect(DB_NAME)
     conn.execute("UPDATE Album_State SET Status = ? WHERE UserID = ? AND StickerID = ?", (new_status, user_id, sticker_id))
     conn.commit()
     conn.close()
 
-# --- CONFIGURACIÓN DE ENTORNO VISUAL ---
+# --- CONFIGURACIÓN VISUAL Y TRATAMIENTO DE INTERFAZ ---
 st.set_page_config(page_title="Panini Matrix Tracker", layout="wide", initial_sidebar_state="expanded")
 init_db()
 
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&family=Inter:wght@300;400;500&display=swap');
-    html, body, [class*="css"] { font-family: 'Inter', sans-serif; background-color: #0b0d12; color: #f3f4f6; }
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&display=swap');
+    html, body, [class*="css"] { font-family: 'Inter', sans-serif; background-color: #080a10; color: #f3f4f6; }
     
     .premium-header { 
-        background: linear-gradient(135deg, #1e1b4b 0%, #0f172a 100%); 
+        background: linear-gradient(135deg, #101524 0%, #05070a 100%); 
         border: 1px solid rgba(99, 102, 241, 0.2); 
-        padding: 20px; 
-        border-radius: 16px; 
-        margin-bottom: 25px; 
+        padding: 24px; 
+        border-radius: 18px; 
+        margin-bottom: 15px; 
+        box-shadow: 0 10px 30px rgba(0,0,0,0.4);
     }
-    .premium-title { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 2rem; background: linear-gradient(90deg, #6366f1, #a855f7, #ec4899); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0; }
+    .premium-title { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 2.3rem; background: linear-gradient(90deg, #6366f1, #a855f7, #ec4899); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0; text-transform: uppercase; letter-spacing: 1.5px; }
     
+    /* Contenedor Premium Estilizado para el Selector de Países en el Panel Principal */
+    .main-navigation-box {
+        background-color: #0f1322;
+        border: 1px solid rgba(99, 102, 241, 0.3) !important;
+        padding: 16px;
+        border-radius: 16px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.25);
+    }
+    
+    .ux-tutorial-bar {
+        background-color: #0f121d;
+        border-left: 4px solid #6366f1;
+        padding: 14px 18px;
+        border-radius: 10px;
+        margin-bottom: 20px;
+        font-size: 0.98rem;
+    }
+    
+    /* Configuración de Botones Base */
     div.stButton > button { 
         font-family: 'Space Grotesk', sans-serif; 
-        border-radius: 12px; 
-        border: 1px solid rgba(255, 255, 255, 0.08) !important; 
-        background: linear-gradient(145deg, #111827, #1f2937) !important; 
-        color: #9ca3af !important; 
-        height: 60px !important; 
-        font-weight: 600; 
-        font-size: 14px; 
-        transition: all 0.2s ease-in-out !important; 
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2) !important; 
+        border-radius: 16px; 
+        transition: all 0.1s ease-in-out !important; 
+        box-shadow: 0 5px 8px rgba(0, 0, 0, 0.25) !important; 
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
     }
-    div.stButton > button:hover { border-color: rgba(99, 102, 241, 0.6) !important; color: #ffffff !important; transform: translateY(-2px) scale(1.01) !important; }
-    div.stButton > button[kind="primary"] { background: linear-gradient(145deg, #4f46e5, #4338ca) !important; color: #ffffff !important; box-shadow: 0 4px 14px rgba(79, 70, 229, 0.4) !important; }
     
-    section[data-testid="stSidebar"] { background-color: #090b0f; border-right: 1px solid rgba(255, 255, 255, 0.05); }
-    .stMetric { background: #111318; padding: 15px; border-radius: 14px; border: 1px solid rgba(255, 255, 255, 0.05); }
-    .lock-screen { text-align: center; padding: 30px; background: #111318; border-radius: 16px; border: 1px solid rgba(255, 255, 255, 0.05); margin-top: 20px; }
+    .st-sticker-missing button { border: 1px solid #374151 !important; background: linear-gradient(145deg, #1f2937, #111827) !important; color: #d1d5db !important; height: 74px !important; font-weight: 600; font-size: 16px !important; }
+    .st-sticker-owned button { background: linear-gradient(145deg, #10b981, #059669) !important; color: #ffffff !important; border: 1px solid #34d399 !important; box-shadow: 0 4px 18px rgba(16, 185, 129, 0.45) !important; height: 74px !important; font-weight: 700; font-size: 16px !important; }
+    .st-sticker-dupe button { background: linear-gradient(145deg, #f97316, #ea580c) !important; color: #ffffff !important; border: 1px solid #fb923c !important; box-shadow: 0 4px 18px rgba(249, 115, 22, 0.5) !important; height: 74px !important; font-weight: 700; font-size: 16px !important; }
+    .st-sticker-shield button { border: 2px solid #fbbf24 !important; background: linear-gradient(145deg, #111422, #07090e) !important; color: #fbbf24 !important; font-size: 17px !important; box-shadow: 0 4px 20px rgba(251, 191, 36, 0.25) !important; }
+    
+    div.stButton > button:active { transform: scale(0.95) !important; }
+    section[data-testid="stSidebar"] { background-color: #05070a; border-right: 1px solid rgba(255, 255, 255, 0.03); }
+    .stMetric { background: #0f121d; padding: 18px; border-radius: 16px; border: 1px solid rgba(255, 255, 255, 0.04); }
+    .lock-screen { text-align: center; padding: 50px 20px; background: #0f121d; border-radius: 18px; border: 1px solid rgba(255, 255, 255, 0.04); margin-top: 20px; }
+    
+    /* Controladores para forzar el Dropdown a verse gigante y accesible en celular */
+    div[data-testid="stSelectbox"] label { font-family: 'Space Grotesk', sans-serif !important; font-weight: 700 !important; color: #6366f1 !important; font-size: 15px !important; text-transform: uppercase; letter-spacing: 0.5px; }
     
     @media (max-width: 768px) {
-        [data-testid="stHorizontalBlock"] { display: flex !important; flex-wrap: wrap !important; gap: 10px !important; }
+        [data-testid="stHorizontalBlock"] { display: flex !important; flex-wrap: wrap !important; gap: 12px !important; }
         [data-testid="stHorizontalBlock"] > div { min-width: 100% !important; flex: 1 1 100% !important; padding: 0 !important; }
-        .premium-title { font-size: 1.5rem !important; }
+        div.stButton > button { height: 78px !important; font-size: 17px !important; }
+        .premium-title { font-size: 1.7rem !important; }
     }
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="premium-header"><h1 class="premium-title">PANINI MATRIX TRACKER</h1><p style="color: #9ca3af; margin: 5px 0 0 0; font-size: 1.1em; font-weight: 300;">Plataforma de Intercambio — Control por Códigos de Postal (48 Selecciones)</p></div>', unsafe_allow_html=True)
+st.markdown('<div class="premium-header"><h1 class="premium-title">🚀 PANINI MATRIX TRACKER</h1><p style="color: #9ca3af; margin: 5px 0 0 0; font-size: 1.1em; font-weight: 300;">Plataforma Homologada de Intercambio — UI de Mandos Centralizados</p></div>', unsafe_allow_html=True)
 
 # --- PANEL DE CONTROL DE IDENTIDAD (SIDEBAR) ---
-st.sidebar.markdown("<h3 style='font-family: Space Grotesk;'>🆔 PANEL DE IDENTIDAD</h3>", unsafe_allow_html=True)
+st.sidebar.markdown("<h3 style='font-family: Space Grotesk;'>🆔 PERFIL DE ACCESO</h3>", unsafe_allow_html=True)
 
 with st.sidebar.expander("🆕 Registrar Nuevo Alias Único"):
     new_username = st.text_input("Crea tu alias exclusivo:", key="new_user_input").strip()
-    if st.button("Guardar en Base de Datos"):
+    if st.button("Guardar en Sistema"):
         if new_username:
             success, _ = create_unique_user(new_username)
             if success:
@@ -213,7 +212,7 @@ st.sidebar.markdown("---")
 existing_users = get_all_users()
 if not existing_users:
     selected_user = None
-    st.sidebar.info("No hay usuarios en la base de datos.")
+    st.sidebar.info("No hay usuarios registrados.")
 else:
     options = ["-- Seleccionar Socio --"] + existing_users
     login_selection = st.sidebar.selectbox("Inicia sesión con tu alias:", options)
@@ -222,23 +221,30 @@ else:
 if not selected_user:
     st.markdown("""
         <div class="lock-screen">
-            <h2 style="font-family: Space Grotesk; color: #a855f7;">👤 IDENTIFICACIÓN REQUERIDA</h2>
-            <p style="color: #9ca3af;">Selecciona tu alias en el menú de la barra lateral para desplegar tu matriz adaptativa de 48 selecciones.</p>
+            <h2 style="font-family: Space Grotesk; color: #6366f1;">👤 IDENTIFICACIÓN REQUERIDA</h2>
+            <p style="color: #9ca3af; font-size: 1.15em; margin-top: 10px;">
+                Por favor, selecciona tu alias en el menú desplegable de la barra lateral izquierda para activar tu matriz de intercambio interactiva.
+            </p>
         </div>
     """, unsafe_allow_html=True)
 else:
     uid = get_user_id(selected_user)
     df_album = get_user_album(uid)
     
-    st.sidebar.markdown("---")
+    # Renderizado y ordenamiento de las secciones del álbum
     sections_raw = list(df_album["Section"].unique())
     sections = sorted(sections_raw)
     if "Intro / Especiales" in sections: 
         sections.insert(0, sections.pop(sections.index("Intro / Especiales")))
     
-    selected_section = st.sidebar.selectbox("Sección Activa:", sections)
+    # =========================================================================
+    # REINGENIERÍA UX: EL DROPDOWN SE MUEVE AL PANEL CENTRAL COMO COMANDO TOP
+    # =========================================================================
+    st.markdown('<div class="main-navigation-box">', unsafe_allow_html=True)
+    selected_section = st.selectbox("📂 SECCIÓN ACTIVA DEL ÁLBUM (SELECCIONA PAÍS):", sections)
+    st.markdown('</div>', unsafe_allow_html=True)
     
-    # KPIs globales
+    # KPIs Globales en la Sidebar (Uso informativo)
     total = len(df_album)
     owned = len(df_album[df_album["Status"] >= 1])
     dupes = len(df_album[df_album["Status"] == 2])
@@ -253,41 +259,74 @@ else:
     str_missing = ", ".join(list_missing) if list_missing else "¡Ninguna! Álbum completo."
     str_repeated = ", ".join(list_repeated) if list_repeated else "No tienes repetidas aún."
 
-    tab_album, tab_trade, tab_clipboard = st.tabs(["🎴 PANEL DEL ÁLBUM", "🔄 PILA DE REPETIDAS", "📋 COPIAR LISTAS"])
+    st.markdown("""
+        <div class="ux-tutorial-bar">
+            <strong>🎮 Guía Táctil Rápida:</strong> Cada toque sobre una postal cambia su estado:<br>
+            <span style="color: #9ca3af; font-weight: 600;">⬡ Gris = Falta</span> | 
+            <span style="color: #34d399; font-weight: 600;">✅ Verde = Tengo</span> | 
+            <span style="color: #fb923c; font-weight: 600;">🔥 Naranja = Repetida</span>
+        </div>
+    """, unsafe_allow_html=True)
 
-    # --- TAB 1: PANEL DEL ÁLBUM (MUESTRA SOLO EL CÓDIGO) ---
-    with tab_album:
+    tab_panel, tab_clipboard = st.tabs(["🎴 MATRIZ INTERACTIVA", "📋 EXPORTAR LISTAS PARA WHATSAPP"])
+
+    with tab_panel:
+        if "filter_state" not in st.session_state:
+            st.session_state.filter_state = "ALL"
+            
+        col_f1, col_f2, col_f3 = st.columns(3)
+        if col_f1.button("👁️ Ver Todo", use_container_width=True):
+            st.session_state.filter_state = "ALL"
+            st.rerun()
+        if col_f2.button("🔴 Solo Faltantes", use_container_width=True):
+            st.session_state.filter_state = "MISS"
+            st.rerun()
+        if col_f3.button("🔥 Solo Repetidas", use_container_width=True):
+            st.session_state.filter_state = "DUPE"
+            st.rerun()
+            
+        if st.session_state.filter_state == "MISS":
+            st.markdown("<p style='color: #ef4444; font-weight: 600; margin-bottom: 15px;'>Filtro Activo: Mostrando únicamente lo que te FALTA 🔴</p>", unsafe_allow_html=True)
+        elif st.session_state.filter_state == "DUPE":
+            st.markdown("<p style='color: #f97316; font-weight: 600; margin-bottom: 15px;'>Filtro Activo: Mostrando únicamente tus REPETIDAS 🔥</p>", unsafe_allow_html=True)
+
         df_sec = df_album[df_album["Section"] == selected_section]
-        cols = st.columns(4)
-        for idx, row in enumerate(df_sec.itertuples()):
-            col = cols[idx % 4]
-            is_owned = row.Status >= 1
-            # CORRECCIÓN: Los botones ahora despliegan únicamente el identificador único
-            label = f"✨ {row.StickerID}" if is_owned else f"⬡ {row.StickerID}"
-            if col.button(label, key=f"al_{row.StickerID}", type="primary" if is_owned else "secondary", use_container_width=True):
-                update_user_status(uid, row.StickerID, 0 if is_owned else 1)
-                st.rerun()
+        
+        if st.session_state.filter_state == "MISS":
+            df_sec = df_sec[df_sec["Status"] == 0]
+        elif st.session_state.filter_state == "DUPE":
+            df_sec = df_sec[df_sec["Status"] == 2]
 
-    # --- TAB 2: PILA DE REPETIDAS ---
-    with tab_trade:
-        df_owned = df_album[(df_album["Section"] == selected_section) & (df_album["Status"] >= 1)]
-        if df_owned.empty:
-            st.info("No tienes activos disponibles en esta sección para intercambio.")
+        if df_sec.empty:
+            st.info("No hay postales que coincidan con el filtro seleccionado en esta sección.")
         else:
             cols = st.columns(4)
-            for idx, row in enumerate(df_owned.itertuples()):
+            for idx, row in enumerate(df_sec.itertuples()):
                 col = cols[idx % 4]
-                is_dupe = row.Status == 2
-                btn_type = "primary" if is_dupe else "secondary"
-                label = f"🔥 REPETIDA ({row.StickerID})" if is_dupe else f"🔒 BLOQUEADA ({row.StickerID})"
                 
-                if col.button(label, key=f"tr_{row.StickerID}", type=btn_type, use_container_width=True):
-                    update_user_status(uid, row.StickerID, 1 if is_dupe else 2)
+                if row.Status == 0:
+                    label = f"⬡ {row.StickerID}   (Falta)"
+                    wrapper_class = "st-sticker-missing"
+                elif row.Status == 1:
+                    label = f"✅ {row.StickerID}   (Tengo)"
+                    wrapper_class = "st-sticker-owned"
+                else:
+                    label = f"🔥 {row.StickerID}   (Repetida)"
+                    wrapper_class = "st-sticker-dupe"
+                
+                if "-00" in row.StickerID:
+                    wrapper_class = "st-sticker-shield"
+                    label = f"👑 {row.StickerID} ESCUDO"
+                
+                st.markdown(f'<div class="{wrapper_class}">', unsafe_allow_html=True)
+                if col.button(label, key=f"al_{row.StickerID}", use_container_width=True):
+                    update_user_status(uid, row.StickerID, row.Status)
                     st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- TAB 3: COPIAR LISTAS ---
     with tab_clipboard:
-        st.subheader("📋 Generador de Listas de Intercambio")
+        st.subheader("📋 Generador Automatizado de Listas de Intercambio")
+        st.write("Copia estas listas y pégalas directamente en el grupo de WhatsApp de tus amigos.")
         col_m, col_r = st.columns(2)
         with col_m:
             st.markdown(f"### 🔴 Mis Faltantes ({len(list_missing)})")
