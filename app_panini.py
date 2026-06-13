@@ -1,19 +1,53 @@
 import threading
 import webbrowser
 import time
-import sqlite3
+import os
 from flask import Flask, render_template_string, request, jsonify
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 app = Flask(__name__)
-DB_NAME = "panini_tracker.db"
 
-# --- 1. CAPA DE DATOS ---
+# --- CONTROL DE ENTORNO ESTRICTO ---
+DATABASE_URL = os.environ.get('DATABASE_URL', '')
+
+def get_db_connection():
+    if not DATABASE_URL:
+        raise ValueError("CRÍTICO: La variable de entorno DATABASE_URL no está configurada.")
+    url = DATABASE_URL.replace("postgres://", "postgresql://", 1) if DATABASE_URL.startswith("postgres://") else DATABASE_URL
+    return psycopg2.connect(url)
+
+# --- CAPA DE DATOS (Dialecto PostgreSQL) ---
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
+    if not DATABASE_URL:
+        return
+        
+    conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('''CREATE TABLE IF NOT EXISTS Stickers (StickerID TEXT PRIMARY KEY, Name TEXT NOT NULL, Section TEXT NOT NULL)''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS Users (UserID INTEGER PRIMARY KEY AUTOINCREMENT, Username TEXT UNIQUE NOT NULL)''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS Album_State (UserID INTEGER, StickerID TEXT, Status INTEGER DEFAULT 0, PRIMARY KEY (UserID, StickerID), FOREIGN KEY(UserID) REFERENCES Users(UserID), FOREIGN KEY(StickerID) REFERENCES Stickers(StickerID))''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS Stickers (
+            StickerID TEXT PRIMARY KEY, 
+            Name TEXT NOT NULL, 
+            Section TEXT NOT NULL
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS Users (
+            UserID SERIAL PRIMARY KEY, 
+            Username TEXT UNIQUE NOT NULL
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS Album_State (
+            UserID INTEGER, 
+            StickerID TEXT, 
+            Status INTEGER DEFAULT 0, 
+            PRIMARY KEY (UserID, StickerID), 
+            FOREIGN KEY(UserID) REFERENCES Users(UserID) ON DELETE CASCADE, 
+            FOREIGN KEY(StickerID) REFERENCES Stickers(StickerID) ON DELETE CASCADE
+        )
+    ''')
     conn.commit()
     
     cursor.execute("SELECT COUNT(*) FROM Stickers")
@@ -37,11 +71,15 @@ def init_db():
             official_stickers.append((f"{code}-00", "Escudo Oficial", team))
             for i in range(1, 12):
                 official_stickers.append((f"{code}-{i:02d}", f"Postal {code}-{i:02d}", team))
-        cursor.executemany("INSERT INTO Stickers VALUES (?, ?, ?)", official_stickers)
+        
+        cursor.executemany("INSERT INTO Stickers VALUES (%s, %s, %s) ON CONFLICT DO NOTHING", official_stickers)
         conn.commit()
     conn.close()
 
-# --- 2. CAPA GRÁFICA (PWA PREMIUM) ---
+if DATABASE_URL:
+    init_db()
+
+# --- CAPA GRÁFICA (PWA PREMIUM LIGHT) ---
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="es">
@@ -50,16 +88,13 @@ HTML_TEMPLATE = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Panini Tracker</title>
     <style>
-        /* RESET & BASE CLARA */
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body { font-family: system-ui, -apple-system, sans-serif; background-color: #F8FAFC; color: #0F172A; margin: 0; padding: 0 0 90px 0; overscroll-behavior-y: none; }
         
-        /* HEADER PREMIUM */
         .app-header { position: sticky; top: 0; z-index: 100; background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(12px); padding: 16px 20px; border-bottom: 1px solid #E2E8F0; text-align: center; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.02); }
         .app-title { font-weight: 800; font-size: 20px; margin: 0; color: #1D4ED8; letter-spacing: -0.5px; }
         .app-subtitle { font-size: 11px; color: #64748B; margin: 4px 0 0 0; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; }
 
-        /* CONTENEDORES Y TARJETAS */
         .view-section { display: none; padding: 20px; animation: fadeIn 0.2s ease-out; }
         .view-section.active { display: block; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
@@ -74,12 +109,10 @@ HTML_TEMPLATE = """
         .btn-primary { background: #2563EB; color: #FFFFFF; border: none; cursor: pointer; margin-top: 10px; transition: transform 0.1s, background 0.2s; box-shadow: 0 4px 6px rgba(37, 99, 235, 0.2); }
         .btn-primary:active { transform: scale(0.96); background: #1D4ED8; }
 
-        /* FILTROS ELEGANTES */
         .filter-bar { display: flex; gap: 8px; margin-bottom: 20px; background: #F1F5F9; padding: 6px; border-radius: 12px; border: 1px solid #E2E8F0; }
         .filter-btn { flex: 1; padding: 10px 0; border-radius: 8px; border: none; background: transparent; color: #64748B; font-size: 13px; font-weight: 700; cursor: pointer; transition: all 0.2s; }
         .filter-btn.active { background: #FFFFFF; color: #0F172A; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
 
-        /* GRID MATRICIAL AGRADABLE */
         .matrix-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
         .matrix-btn { 
             height: 72px; border-radius: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 14px; font-weight: 700; 
@@ -88,19 +121,16 @@ HTML_TEMPLATE = """
         }
         .matrix-btn:active { transform: scale(0.9) !important; }
 
-        /* PALETA DE ESTADOS SUAVES Y AGRADABLES */
-        .state-0 { background: #F1F5F9; color: #64748B; border: 1px solid #E2E8F0; } /* Gris Perla - Falta */
-        .state-1 { background: #ECFDF5; color: #065F46; border: 1px solid #A7F3D0; box-shadow: 0 4px 10px rgba(16, 185, 129, 0.1); } /* Menta - Tengo */
-        .state-2 { background: #FFF7ED; color: #9A3412; border: 1px solid #FDBA74; box-shadow: 0 4px 10px rgba(249, 115, 22, 0.1); } /* Melocotón - Repetida */
+        .state-0 { background: #F1F5F9; color: #64748B; border: 1px solid #E2E8F0; }
+        .state-1 { background: #ECFDF5; color: #065F46; border: 1px solid #A7F3D0; box-shadow: 0 4px 10px rgba(16, 185, 129, 0.1); }
+        .state-2 { background: #FFF7ED; color: #9A3412; border: 1px solid #FDBA74; box-shadow: 0 4px 10px rgba(249, 115, 22, 0.1); }
         .shield { border: 2px solid #F59E0B !important; font-size: 15px; background-image: linear-gradient(to bottom right, rgba(253, 230, 138, 0.2), transparent); }
 
-        /* ESTADÍSTICAS LIMPIAS */
         .stats-box { display: flex; justify-content: space-between; background: #FFFFFF; padding: 20px; border-radius: 16px; margin-bottom: 20px; border: 1px solid #F1F5F9; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.02); }
         .stat-item { text-align: center; flex: 1; }
         .stat-val { font-size: 22px; font-weight: 800; display: block; letter-spacing: -0.5px; }
         .stat-lbl { font-size: 11px; color: #94A3B8; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; margin-top: 4px; display: block; }
 
-        /* NAVEGACIÓN INFERIOR ESTILO IOS */
         .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(20px); border-top: 1px solid #E2E8F0; display: flex; justify-content: space-around; padding: 12px 10px 25px 10px; z-index: 1000; }
         .nav-item { flex: 1; text-align: center; padding: 8px 0; color: #94A3B8; font-size: 11px; font-weight: 700; text-transform: uppercase; cursor: pointer; transition: color 0.2s; letter-spacing: 0.5px; }
         .nav-item.active { color: #2563EB; }
@@ -149,7 +179,7 @@ HTML_TEMPLATE = """
             <select id="userSelect" onchange="switchUser()">
                 <option value="">-- SELECCIONA ALIAS --</option>
                 {% for user in users %}
-                    <option value="{{ user.UserID }}">{{ user.Username }}</option>
+                    <option value="{{ user.userid }}">{{ user.username }}</option>
                 {% endfor %}
             </select>
         </div>
@@ -230,8 +260,8 @@ HTML_TEMPLATE = """
 
         function updateStats() {
             const total = albumData.length;
-            const owned = albumData.filter(s => s.Status >= 1).length;
-            const dupes = albumData.filter(s => s.Status === 2).length;
+            const owned = albumData.filter(s => s.status >= 1).length;
+            const dupes = albumData.filter(s => s.status === 2).length;
             const prog = total > 0 ? Math.round((owned/total)*100) : 0;
             
             document.getElementById('statOwned').innerText = owned;
@@ -251,27 +281,27 @@ HTML_TEMPLATE = """
             const grid = document.getElementById('matrixGrid');
             grid.innerHTML = '';
 
-            let targetData = albumData.filter(s => s.Section === section);
-            if(activeFilter === 'MISSING') targetData = targetData.filter(s => s.Status === 0);
-            if(activeFilter === 'DUPES') targetData = targetData.filter(s => s.Status === 2);
+            let targetData = albumData.filter(s => s.section === section);
+            if(activeFilter === 'MISSING') targetData = targetData.filter(s => s.status === 0);
+            if(activeFilter === 'DUPES') targetData = targetData.filter(s => s.status === 2);
 
             targetData.forEach(sticker => {
                 const btn = document.createElement('button');
-                btn.className = `matrix-btn state-${sticker.Status}`;
-                if (sticker.StickerID.includes('-00')) btn.classList.add('shield');
-                btn.innerText = sticker.StickerID;
+                btn.className = `matrix-btn state-${sticker.status}`;
+                if (sticker.stickerid.includes('-00')) btn.classList.add('shield');
+                btn.innerText = sticker.stickerid;
 
                 btn.onclick = () => {
-                    sticker.Status = (sticker.Status + 1) % 3;
-                    btn.className = `matrix-btn state-${sticker.Status}`;
-                    if (sticker.StickerID.includes('-00')) btn.classList.add('shield');
+                    sticker.status = (sticker.status + 1) % 3;
+                    btn.className = `matrix-btn state-${sticker.status}`;
+                    if (sticker.stickerid.includes('-00')) btn.classList.add('shield');
                     
                     updateStats();
                     
                     fetch('/api/update', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ user_id: currentUserId, sticker_id: sticker.StickerID, status: sticker.Status })
+                        body: JSON.stringify({ user_id: currentUserId, sticker_id: sticker.stickerid, status: sticker.status })
                     });
 
                     if(activeFilter !== 'ALL') {
@@ -283,23 +313,27 @@ HTML_TEMPLATE = """
         }
 
         function generateExportLists() {
-            const missing = albumData.filter(s => s.Status === 0).map(s => s.StickerID).join(', ');
-            const dupes = albumData.filter(s => s.Status === 2).map(s => s.StickerID).join(', ');
-            document.getElementById('exportMissing').value = missing || "ÁLBUM COMPLETO";
-            document.getElementById('exportDupes').value = dupes || "SIN REPETIDAS";
+            document.getElementById('exportMissing').value = albumData.filter(s => s.status === 0).map(s => s.stickerid).join(', ');
+            document.getElementById('exportDupes').value = albumData.filter(s => s.status === 2).map(s => s.stickerid).join(', ');
         }
     </script>
 </body>
 </html>
 """
 
-# --- 3. ENDPOINTS API REST ---
+# --- ENDPOINTS API REST ---
 @app.route('/')
 def index():
-    conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row
-    users = [dict(row) for row in conn.execute("SELECT * FROM Users ORDER BY Username ASC").fetchall()]
-    sections_raw = [r[0] for r in conn.execute("SELECT DISTINCT Section FROM Stickers").fetchall()]
+    if not DATABASE_URL:
+        return "Servidor activo. Falta configurar la variable DATABASE_URL localmente."
+    
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    cursor.execute("SELECT * FROM Users ORDER BY Username ASC")
+    users = [dict(row) for row in cursor.fetchall()]
+    
+    cursor.execute("SELECT DISTINCT Section FROM Stickers")
+    sections_raw = [row['section'] for row in cursor.fetchall()]
     sections = sorted(sections_raw)
     if "Intro / Especiales" in sections:
         sections.insert(0, sections.pop(sections.index("Intro / Especiales")))
@@ -309,33 +343,35 @@ def index():
 @app.route('/api/user', methods=['POST'])
 def create_user():
     username = request.json.get('username')
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
+    cursor = conn.cursor()
     try:
-        cursor = conn.cursor()
-        cursor.execute("INSERT INTO Users (Username) VALUES (?)", (username,))
-        uid = cursor.lastrowid
-        cursor.execute("INSERT OR IGNORE INTO Album_State (UserID, StickerID, Status) SELECT ?, StickerID, 0 FROM Stickers", (uid,))
+        cursor.execute("INSERT INTO Users (Username) VALUES (%s) RETURNING UserID", (username,))
+        uid = cursor.fetchone()[0]
+        cursor.execute("INSERT INTO Album_State (UserID, StickerID, Status) SELECT %s, StickerID, 0 FROM Stickers ON CONFLICT DO NOTHING", (uid,))
         conn.commit()
         return jsonify({"success": True})
-    except sqlite3.IntegrityError:
+    except psycopg2.IntegrityError:
         return jsonify({"error": "Exists"}), 400
     finally:
         conn.close()
 
 @app.route('/api/album/<int:user_id>')
 def get_album(user_id):
-    conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row
-    query = "SELECT s.StickerID, s.Section, a.Status FROM Stickers s JOIN Album_State a ON s.StickerID = a.StickerID WHERE a.UserID = ?"
-    album = [dict(row) for row in conn.execute(query, (user_id,)).fetchall()]
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    query = "SELECT s.StickerID, s.Section, a.Status FROM Stickers s JOIN Album_State a ON s.StickerID = a.StickerID WHERE a.UserID = %s"
+    cursor.execute(query, (user_id,))
+    album = [dict(row) for row in cursor.fetchall()]
     conn.close()
     return jsonify(album)
 
 @app.route('/api/update', methods=['POST'])
 def update_sticker():
     data = request.json
-    conn = sqlite3.connect(DB_NAME)
-    conn.execute("UPDATE Album_State SET Status = ? WHERE UserID = ? AND StickerID = ?", (data['status'], data['user_id'], data['sticker_id']))
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE Album_State SET Status = %s WHERE UserID = %s AND StickerID = %s", (data['status'], data['user_id'], data['sticker_id']))
     conn.commit()
     conn.close()
     return jsonify({"success": True})
@@ -345,7 +381,8 @@ def open_browser():
     webbrowser.open("http://127.0.0.1:5005")
 
 if __name__ == '__main__':
-    init_db()
-    threading.Thread(target=open_browser, daemon=True).start()
-    print("🚀 NÚCLEO INICIADO: Abriendo navegador en Puerto 5005...")
+    if not DATABASE_URL:
+        print("⚠️ ALERTA: No has definido la variable DATABASE_URL localmente.")
+    else:
+        threading.Thread(target=open_browser, daemon=True).start()
     app.run(host='0.0.0.0', port=5005, debug=True, use_reloader=False)
